@@ -29,31 +29,27 @@ jobs:
           echo "Source folder:"
           dir src
 
-      - name: Clean old install files
-        run: |
-          if exist node_modules rmdir /s /q node_modules
-          if exist package-lock.json del package-lock.json
-        shell: cmd
-
       - name: Install dependencies
         run: npm install --include=dev --no-audit --no-fund
 
-      - name: Check Vite installation
+      - name: Check Vite
         run: npx vite --version
 
       - name: Build React app
         run: npx vite build
 
       - name: Build Windows EXE
-        run: npx electron-builder --win nsis --x64
+        run: npx electron-builder --win nsis --x64 --publish never
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: false
 
       - name: Upload Windows EXE
         uses: actions/upload-artifact@v4
         with:
           name: Aerizen-Windows-EXE
           path: |
-            dist/*.exe
             release/*.exe
-            dist/**/*.exe
             release/**/*.exe
+            dist/*.exe
+            dist/**/*.exe
           if-no-files-found: error
