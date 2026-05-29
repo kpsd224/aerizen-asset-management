@@ -1,0 +1,61 @@
+{
+  "name": "aerizen-asset-management",
+  "version": "3.4.0",
+  "description": "Aerizen Asset Management v3.4 - blank screen fix for packaged Electron build, relative Vite assets, startup fallback, and local data migration.",
+  "author": "Aerizen",
+  "private": true,
+  "main": "electron/main.cjs",
+  "type": "module",
+  "scripts": {
+    "dev": "vite --host 127.0.0.1",
+    "electron:dev": "concurrently \"vite --host 127.0.0.1\" \"wait-on tcp:5173 && electron .\"",
+    "build": "vite build",
+    "dist": "npm run build && electron-builder --win nsis portable",
+    "dist:portable": "npm run build && electron-builder --win portable --publish never",
+    "test": "node scripts/smoke-test.cjs",
+    "dist:installer": "npm run build && electron-builder --win nsis --publish never"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.45.0",
+    "@vitejs/plugin-react": "^4.3.1",
+    "vite": "^5.4.0",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "xlsx": "^0.18.5"
+  },
+  "devDependencies": {
+    "concurrently": "^9.0.0",
+    "electron": "^32.0.0",
+    "electron-builder": "^25.0.5",
+    "wait-on": "^8.0.0"
+  },
+  "build": {
+    "appId": "com.aerizen.assetmanagement",
+    "productName": "Aerizen Asset Management",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "dist/**/*",
+      "electron/**/*",
+      "package.json"
+    ],
+    "win": {
+      "target": [
+        "nsis",
+        "portable"
+      ],
+      "artifactName": "Aerizen-Asset-Management-${version}-${arch}.${ext}"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": false,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "Aerizen Asset Management",
+      "deleteAppDataOnUninstall": false,
+      "runAfterFinish": true,
+      "uninstallDisplayName": "Aerizen Asset Management"
+    }
+  }
+}
