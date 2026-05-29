@@ -15,22 +15,34 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Show project files
-        run: |
-          dir
-          dir electron
-          dir src
-
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: 20
 
+      - name: Show project structure
+        run: |
+          echo "Root files:"
+          dir
+          echo "Electron folder:"
+          dir electron
+          echo "Source folder:"
+          dir src
+
+      - name: Clean old install files
+        run: |
+          if exist node_modules rmdir /s /q node_modules
+          if exist package-lock.json del package-lock.json
+        shell: cmd
+
       - name: Install dependencies
-        run: npm install
+        run: npm install --include=dev --no-audit --no-fund
+
+      - name: Check Vite installation
+        run: npx vite --version
 
       - name: Build React app
-        run: npm run build
+        run: npx vite build
 
       - name: Build Windows EXE
         run: npx electron-builder --win nsis --x64
@@ -41,5 +53,7 @@ jobs:
           name: Aerizen-Windows-EXE
           path: |
             dist/*.exe
+            release/*.exe
             dist/**/*.exe
+            release/**/*.exe
           if-no-files-found: error
