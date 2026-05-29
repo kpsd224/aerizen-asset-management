@@ -1,61 +1,45 @@
 name: Build Windows EXE
 
 on:
-  workflow_dispatch:
   push:
     branches:
       - main
+  workflow_dispatch:
 
 jobs:
   build-windows:
+    name: Build Aerizen Windows EXE
     runs-on: windows-latest
 
     steps:
-      - name: Checkout source code
+      - name: Checkout repository
         uses: actions/checkout@v4
+
+      - name: Show project files
+        run: |
+          dir
+          dir electron
+          dir src
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: 20
 
-      - name: Find package.json
-        id: find_package
-        shell: powershell
-        run: |
-          $pkg = Get-ChildItem -Path . -Filter package.json -Recurse | Select-Object -First 1
-          if (-not $pkg) {
-            Write-Error "package.json tidak ditemukan di repository."
-            exit 1
-          }
-          echo "Package found at: $($pkg.FullName)"
-          echo "PROJECT_DIR=$($pkg.Directory.FullName)" >> $env:GITHUB_ENV
-
       - name: Install dependencies
-        shell: powershell
-        run: |
-          cd "$env:PROJECT_DIR"
-          npm install
+        run: npm install
 
       - name: Build React app
-        shell: powershell
-        run: |
-          cd "$env:PROJECT_DIR"
-          npm run build
+        run: npm run build
 
-      - name: Build Windows installer
-        shell: powershell
-        run: |
-          cd "$env:PROJECT_DIR"
-          npm run dist
+      - name: Build Windows EXE
+        run: npx electron-builder --win nsis --x64
 
-      - name: Find EXE files
-        shell: powershell
-        run: |
-          Get-ChildItem -Path "$env:PROJECT_DIR" -Recurse -Filter *.exe
-
-      - name: Upload EXE artifact
+      - name: Upload Windows EXE
         uses: actions/upload-artifact@v4
         with:
-          name: Aerizen-Asset-Management-Windows-Installer
-          path: "**/*.exe"
+          name: Aerizen-Windows-EXE
+          path: |
+            dist/*.exe
+            dist/**/*.exe
+          if-no-files-found: error
