@@ -1,0 +1,58 @@
+{
+  "name": "aerizen-asset-management",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Aerizen Asset Management desktop app with Excel import for rental vehicles.",
+  "main": "electron/main.cjs",
+  "author": "Aerizen",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "electron:dev": "concurrently \"npm run dev\" \"wait-on http://localhost:5173 && electron .\"",
+    "build": "vite build",
+    "dist": "npm run build && electron-builder --win nsis --x64",
+    "dist:portable": "npm run build && electron-builder --win portable --x64"
+  },
+  "dependencies": {
+    "@vitejs/plugin-react": "4.3.4",
+    "vite": "5.4.11",
+    "react": "18.3.1",
+    "react-dom": "18.3.1",
+    "framer-motion": "11.11.17",
+    "lucide-react": "0.468.0",
+    "xlsx": "0.18.5"
+  },
+  "devDependencies": {
+    "autoprefixer": "10.4.20",
+    "concurrently": "9.1.0",
+    "electron": "33.2.1",
+    "electron-builder": "25.1.8",
+    "postcss": "8.4.49",
+    "tailwindcss": "3.4.17",
+    "wait-on": "8.0.1"
+  },
+  "build": {
+    "appId": "com.aerizen.assetmanagement",
+    "productName": "Aerizen Asset Management",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "dist/**/*",
+      "electron/**/*",
+      "package.json"
+    ],
+    "win": {
+      "target": [
+        "nsis"
+      ],
+      "artifactName": "Aerizen-Asset-Management-Setup-${version}.${ext}"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true
+    }
+  }
+}
