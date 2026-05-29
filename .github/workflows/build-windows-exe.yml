@@ -1,7 +1,0 @@
-      - name: Install dependencies
-        working-directory: aerizen_asset_management_github_ready
-        run: npm install
-
-      - name: Build Windows installer
-        working-directory: aerizen_asset_management_github_ready
-        run: npm run dist
