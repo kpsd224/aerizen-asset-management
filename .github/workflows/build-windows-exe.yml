@@ -14,29 +14,45 @@ jobs:
       - name: Checkout source code
         uses: actions/checkout@v4
 
-      - name: Show files
-        run: |
-          dir
-          echo "Current folder:"
-          cd
-
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: 20
 
+      - name: Find package.json
+        id: find_package
+        shell: powershell
+        run: |
+          $pkg = Get-ChildItem -Path . -Filter package.json -Recurse | Select-Object -First 1
+          if (-not $pkg) {
+            Write-Error "package.json tidak ditemukan di repository."
+            exit 1
+          }
+          echo "Package found at: $($pkg.FullName)"
+          echo "PROJECT_DIR=$($pkg.Directory.FullName)" >> $env:GITHUB_ENV
+
       - name: Install dependencies
-        run: npm install
+        shell: powershell
+        run: |
+          cd "$env:PROJECT_DIR"
+          npm install
 
       - name: Build React app
-        run: npm run build
+        shell: powershell
+        run: |
+          cd "$env:PROJECT_DIR"
+          npm run build
 
       - name: Build Windows installer
-        run: npm run dist
-
-      - name: Find EXE
         shell: powershell
-        run: Get-ChildItem -Recurse -Filter *.exe
+        run: |
+          cd "$env:PROJECT_DIR"
+          npm run dist
+
+      - name: Find EXE files
+        shell: powershell
+        run: |
+          Get-ChildItem -Path "$env:PROJECT_DIR" -Recurse -Filter *.exe
 
       - name: Upload EXE artifact
         uses: actions/upload-artifact@v4
