@@ -1,0 +1,383 @@
+import React, { useEffect, useMemo, useRef, useState } from 'react';
+import * as XLSX from 'xlsx';
+import { createClient } from '@supabase/supabase-js';
+
+const STORAGE_KEY = 'aerizen.v3.state';
+const SETTINGS_KEY = 'aerizen.v3.settings';
+const QUEUE_KEY = 'aerizen.v3.syncQueue';
+// v3.7 Asset ID Card Photo: Vite relative asset path, installer resmi, notification bell, enterprise workflow, dan tampilan foto kendaraan kembali seperti kartu BPKB/asset identity card agar foto terlihat premium dan tidak gepeng.
+
+const today = new Date().toISOString().slice(0, 10);
+const currency = new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR', maximumFractionDigits: 0 });
+
+const statusOptions = ['Tersedia', 'Disewakan', 'Dipakai Internal', 'Maintenance', 'Perbaikan', 'Overdue', 'Nonaktif'];
+const categoryOptions = ['Kendaraan', 'Perangkat IT', 'Peralatan Kantor', 'Mesin', 'Properti', 'Lainnya'];
+const workOrderStatus = ['Draft', 'Menunggu Approval', 'Dijadwalkan', 'Dikerjakan', 'Menunggu Sparepart', 'Menunggu Vendor', 'Menunggu QC', 'Selesai', 'Ditutup'];
+const workOrderType = ['Preventive Maintenance', 'Corrective Maintenance', 'Emergency Repair', 'Vendor Repair', 'Warranty Claim', 'Inspection', 'Reconditioning'];
+const priorityOptions = ['Rendah', 'Sedang', 'Tinggi', 'Kritis'];
+
+const tabs = [
+  ['dashboard', 'Dashboard'],
+  ['assets', 'Aset'],
+  ['contracts', 'Kontrak'],
+  ['operations', 'Operasional'],
+  ['maintenance', 'Maintenance'],
+  ['finance', 'Finance'],
+  ['inventory', 'Sparepart'],
+  ['vendors', 'Vendor'],
+  ['tickets', 'Ticket'],
+  ['documents', 'Dokumen'],
+  ['approvals', 'Approval'],
+  ['reports', 'Laporan'],
+  ['account', 'Akun'],
+  ['configuration', 'Konfigurasi'],
+];
+
+const initialAssets = [
+  {
+    id: 'AST-KND-2026-0184',
+    nama: 'Toyota Innova Zenix',
+    kategori: 'Kendaraan', tipe: 'Aset Rental', status: 'Disewakan', kondisi: 'Sangat Baik', cabang: 'Jakarta', lokasi: 'Pool Jakarta A',
+    pemegang: 'PT Nusantara Retail', perusahaanUser: 'PT Nusantara Retail', alamatUser: 'Jl. Sudirman No. 10, Jakarta', wilayah: 'Jakarta',
+    warna: 'Hitam', tahunKendaraan: '2024', nomorRangka: 'MHFABCD1234567890', nomorMesin: '2GDE123456', nomorPolisi: 'B 184 AZN',
+    qrCode: 'QR-AERIZEN-AST-KND-2026-0184', tanggalSTNK: '2026-12-31', tanggalKIR: '2026-08-12', tanggalPajak: '2026-12-31', tanggalAsuransi: '2026-09-30', tanggalServiceBerikutnya: '2026-07-05', memilikiBPKB: 'Ya',
+    gambar: '', risiko: 18, utilisasi: 91, nilaiBuku: 287500000, pendapatanBulanan: 18400000, biayaBulanan: 4200000,
+    aksiBerikutnya: 'Perpanjangan kontrak dalam 6 hari', dokumen: 'STNK berlaku sampai 2026-12-31 · BPKB: Ya', telemetri: 'GPS Online · 42.180 km',
+    alur: 'Disewakan → Monitoring → Perpanjangan / Pengembalian', riwayat: ['Terdaftar', 'Dipasang QR', 'Disewakan', 'GPS Sinkron', 'Invoice Terbit'], updatedAt: new Date().toISOString(),
+  },
+  {
+    id: 'AST-IT-2026-0441',
+    nama: 'HP EliteBook 840 G11', kategori: 'Perangkat IT', tipe: 'Aset Rental IT', status: 'Dipakai Internal', kondisi: 'Baik', cabang: 'Bandung', lokasi: 'Cabang Bandung',
+    pemegang: 'Ayu Pramesti · Tim Produk', perusahaanUser: 'Internal', alamatUser: 'Cabang Bandung', wilayah: 'Bandung', warna: 'Silver', tahunKendaraan: '-',
+    nomorRangka: 'SN-HP840-2026-0441', nomorMesin: 'IMEI-MDM-0441', nomorPolisi: '-', qrCode: 'QR-AERIZEN-AST-IT-2026-0441', tanggalSTNK: '', tanggalKIR: '', tanggalPajak: '', tanggalAsuransi: '', tanggalServiceBerikutnya: '2026-06-18', memilikiBPKB: '-',
+    gambar: '', risiko: 26, utilisasi: 76, nilaiBuku: 31900000, pendapatanBulanan: 0, biayaBulanan: 850000,
+    aksiBerikutnya: 'Cek kesehatan baterai dan garansi', dokumen: 'Garansi berlaku 218 hari lagi', telemetri: 'MDM Online · Enkripsi Aktif',
+    alur: 'Ditugaskan → Pemeriksaan Berkala → Kembali / Mutasi', riwayat: ['Terdaftar', 'Setup Keamanan', 'Ditugaskan', 'Cek MDM'], updatedAt: new Date().toISOString(),
+  },
+  {
+    id: 'AST-KND-2025-0098',
+    nama: 'Mitsubishi L300 Box', kategori: 'Kendaraan', tipe: 'Aset Operasional', status: 'Maintenance', kondisi: 'Perlu Servis', cabang: 'Surabaya', lokasi: 'Yard Surabaya',
+    pemegang: 'Logistik Internal', perusahaanUser: 'Internal Logistik', alamatUser: 'Yard Surabaya', wilayah: 'Surabaya', warna: 'Putih', tahunKendaraan: '2022',
+    nomorRangka: 'MK2L3009876543210', nomorMesin: '4D56ABC987', nomorPolisi: 'L 98 AZN', qrCode: 'QR-AERIZEN-AST-KND-2025-0098', tanggalSTNK: '2026-06-20', tanggalKIR: '2026-06-17', tanggalPajak: '2026-06-20', tanggalAsuransi: '2026-07-02', tanggalServiceBerikutnya: '2026-06-08', memilikiBPKB: 'Ya',
+    gambar: '', risiko: 72, utilisasi: 58, nilaiBuku: 132000000, pendapatanBulanan: 9700000, biayaBulanan: 7100000,
+    aksiBerikutnya: 'Inspeksi rem menunggu QC', dokumen: 'KIR habis dalam 19 hari', telemetri: 'GPS Online · 83.900 km',
+    alur: 'Work Order → Vendor Repair → QC → Tersedia', riwayat: ['Terdaftar', 'Dipakai Logistik', 'Insiden', 'Work Order', 'Menunggu QC'], updatedAt: new Date().toISOString(),
+  },
+];
+
+const initialWorkOrders = [
+  { id: 'WO-2026-0912', asetId: 'AST-KND-2025-0098', namaAset: 'Mitsubishi L300 Box', nopol: 'L 98 AZN', jenis: 'Corrective Maintenance', prioritas: 'Tinggi', status: 'Menunggu QC', pic: 'Vendor Surabaya', vendorId: 'VDR-002', tanggalMulai: '2026-05-28', jatuhTempo: '2026-05-29', tanggalSelesai: '', biaya: 3500000, sparepart: 'Brake pad depan', fotoBefore: 'Belum diunggah', fotoAfter: 'Menunggu QC', keluhan: 'Rem kurang pakem dan muncul suara saat pengereman.', checklist: 'Cek rem depan, cek rem belakang, test drive, foto evidence, QC akhir', updatedAt: new Date().toISOString() },
+  { id: 'WO-2026-0825', asetId: 'AST-KND-2026-0184', namaAset: 'Toyota Innova Zenix', nopol: 'B 184 AZN', jenis: 'Preventive Maintenance', prioritas: 'Sedang', status: 'Selesai', pic: 'Bengkel Rekanan Jakarta', vendorId: 'VDR-001', tanggalMulai: '2026-05-10', jatuhTempo: '2026-05-10', tanggalSelesai: '2026-05-10', biaya: 1250000, sparepart: 'Oli mesin + filter', fotoBefore: 'Ada', fotoAfter: 'Ada', keluhan: 'Servis berkala 10.000 km dan ganti oli.', checklist: 'Ganti oli, cek filter, cek rem, QC akhir', updatedAt: new Date().toISOString() },
+];
+
+const initialContracts = [
+  { id: 'CTR-2026-0007', customer: 'PT Nusantara Retail', asetId: 'AST-KND-2026-0184', aset: 'Toyota Innova Zenix', nilaiBulanan: 18400000, deposit: 30000000, mulai: '2026-01-01', selesai: '2026-06-30', status: 'Aktif', billingCycle: 'Bulanan', dokumen: 'Kontrak_Nusantara_0007.pdf', renewal: 'Perlu follow up H-30' },
+  { id: 'CTR-2026-0012', customer: 'PT Sinar Logistik', asetId: 'AST-KND-2025-0098', aset: 'Mitsubishi L300 Box', nilaiBulanan: 9700000, deposit: 15000000, mulai: '2026-03-15', selesai: '2026-10-15', status: 'Menunggu Dokumen', billingCycle: 'Bulanan', dokumen: 'Draft_Sinar_0012.pdf', renewal: 'Menunggu PO' },
+];
+
+const initialInvoices = [
+  { id: 'INV-2026-0501', contractId: 'CTR-2026-0007', customer: 'PT Nusantara Retail', periode: 'Mei 2026', amount: 18400000, paid: 18400000, dueDate: '2026-05-25', status: 'Paid' },
+  { id: 'INV-2026-0601', contractId: 'CTR-2026-0007', customer: 'PT Nusantara Retail', periode: 'Juni 2026', amount: 18400000, paid: 0, dueDate: '2026-06-25', status: 'Unpaid' },
+  { id: 'INV-2026-0602', contractId: 'CTR-2026-0012', customer: 'PT Sinar Logistik', periode: 'Juni 2026', amount: 9700000, paid: 2500000, dueDate: '2026-06-20', status: 'Partial' },
+];
+
+const initialChecklists = [
+  { id: 'CHK-OUT-001', tipe: 'Check-out', asetId: 'AST-KND-2026-0184', aset: 'Toyota Innova Zenix', tanggal: '2026-05-24', pic: 'Driver Jakarta', penerima: 'Rizky · PT Nusantara Retail', km: '42.180', bbm: '80%', kondisi: 'Body baik, interior bersih', aksesoris: 'STNK, toolkit, dongkrak, kunci cadangan', tandaTangan: 'Sudah', status: 'Selesai' },
+  { id: 'CHK-IN-002', tipe: 'Check-in', asetId: 'AST-IT-2026-0441', aset: 'HP EliteBook 840 G11', tanggal: '2026-05-28', pic: 'IT Support Bandung', penerima: 'Ayu Pramesti', km: '-', bbm: '-', kondisi: 'Keyboard dan charger lengkap', aksesoris: 'Charger, sleeve, stylus', tandaTangan: 'Menunggu', status: 'Draft' },
+];
+
+const initialInventory = [
+  { id: 'SP-OLI-001', nama: 'Oli Mesin 5W-30', kategori: 'Kendaraan', stok: 24, min: 10, satuan: 'Liter', lokasi: 'Gudang Jakarta', nilai: 185000, vendor: 'Bengkel Rekanan Jakarta' },
+  { id: 'SP-BAN-001', nama: 'Ban 205/65 R16', kategori: 'Kendaraan', stok: 8, min: 8, satuan: 'Pcs', lokasi: 'Pool Surabaya', nilai: 980000, vendor: 'PT Ban Prima' },
+  { id: 'SP-CHG-001', nama: 'Charger USB-C 65W', kategori: 'Perangkat IT', stok: 17, min: 12, satuan: 'Unit', lokasi: 'Gudang IT Bandung', nilai: 325000, vendor: 'IT Supplier Bandung' },
+];
+
+const initialVendors = [
+  { id: 'VDR-001', nama: 'Bengkel Rekanan Jakarta', jenis: 'Bengkel Kendaraan', kontak: '0812-0000-1001', kota: 'Jakarta', rating: 4.8, avgCost: 1450000, avgLeadTime: '1.2 hari', transaksi: 38, status: 'Aktif' },
+  { id: 'VDR-002', nama: 'Vendor Surabaya', jenis: 'Repair Kendaraan', kontak: '0812-0000-2002', kota: 'Surabaya', rating: 4.2, avgCost: 3200000, avgLeadTime: '2.4 hari', transaksi: 21, status: 'Aktif' },
+  { id: 'VDR-003', nama: 'IT Supplier Bandung', jenis: 'Perangkat IT', kontak: '0812-0000-3003', kota: 'Bandung', rating: 4.6, avgCost: 825000, avgLeadTime: '1.7 hari', transaksi: 16, status: 'Aktif' },
+];
+
+const initialTickets = [
+  { id: 'TCK-2026-0044', customer: 'PT Nusantara Retail', asetId: 'AST-KND-2026-0184', aset: 'Toyota Innova Zenix', kategori: 'Keluhan customer', prioritas: 'Sedang', sla: '2026-05-30', status: 'Open', pic: 'Customer Success', deskripsi: 'Customer meminta jadwal penggantian unit saat maintenance.' },
+  { id: 'TCK-2026-0045', customer: 'Internal Logistik', asetId: 'AST-KND-2025-0098', aset: 'Mitsubishi L300 Box', kategori: 'Mobilisasi', prioritas: 'Tinggi', sla: '2026-05-29', status: 'In Progress', pic: 'Ops Surabaya', deskripsi: 'Unit belum bisa keluar karena menunggu QC rem.' },
+];
+
+const initialDocuments = [
+  { id: 'DOC-001', asetId: 'AST-KND-2026-0184', nama: 'STNK Toyota Innova Zenix', tipe: 'STNK', expired: '2026-12-31', pemilik: 'Legal Asset', status: 'Valid', file: 'stnk-innova.pdf' },
+  { id: 'DOC-002', asetId: 'AST-KND-2025-0098', nama: 'KIR Mitsubishi L300 Box', tipe: 'KIR', expired: '2026-06-17', pemilik: 'Operasional Surabaya', status: 'Hampir Habis', file: 'kir-l300.pdf' },
+  { id: 'DOC-003', asetId: 'AST-IT-2026-0441', nama: 'Garansi HP EliteBook', tipe: 'Garansi IT', expired: '2027-01-05', pemilik: 'IT Asset', status: 'Valid', file: 'garansi-elitebook.pdf' },
+];
+
+const initialApprovals = [
+  { id: 'APR-REPAIR-001', proses: 'Repair > Rp5 juta', approval: 'Supervisor + Finance', limit: 5000000, status: 'Aktif', pending: '0' },
+  { id: 'APR-DISPOSAL-001', proses: 'Disposal aset', approval: 'Asset Manager + Direktur', limit: 0, status: 'Aktif', pending: '1' },
+  { id: 'APR-RENTAL-001', proses: 'Harga rental khusus', approval: 'Sales Manager', limit: 0, status: 'Aktif', pending: '2' },
+  { id: 'APR-MUTASI-001', proses: 'Mutasi antar cabang', approval: 'Dua Branch Manager', limit: 0, status: 'Aktif', pending: '0' },
+];
+
+const initialRoles = [
+  { id: 'ROLE-001', role: 'Super Admin', akses: 'Semua modul, konfigurasi, hapus data, restore backup', user: 'Owner / Direktur' },
+  { id: 'ROLE-002', role: 'Admin Asset', akses: 'Tambah/edit aset, dokumen, import Excel, QR aset', user: 'Asset team' },
+  { id: 'ROLE-003', role: 'Operasional', akses: 'Check-in/out, kontrak, delivery, pickup, ticket SLA', user: 'Field ops' },
+  { id: 'ROLE-004', role: 'Maintenance', akses: 'Work Order, biaya aktual, sparepart, vendor, foto before/after', user: 'Maintenance team' },
+  { id: 'ROLE-005', role: 'Finance', akses: 'Invoice, billing, revenue, profit, laporan', user: 'Finance team' },
+  { id: 'ROLE-006', role: 'Client Viewer', akses: 'Hanya lihat aset, kontrak, invoice, ticket milik customer', user: 'Customer portal' },
+];
+
+const initialState = {
+  assets: initialAssets,
+  workOrders: initialWorkOrders,
+  contracts: initialContracts,
+  invoices: initialInvoices,
+  checklists: initialChecklists,
+  inventory: initialInventory,
+  vendors: initialVendors,
+  tickets: initialTickets,
+  documents: initialDocuments,
+  approvals: initialApprovals,
+  roles: initialRoles,
+  auditLogs: [
+    { id: 'LOG-001', waktu: new Date().toISOString(), aksi: 'Seed data', detail: 'Data awal Aerizen v3.0 Enterprise dibuat offline', user: 'System' },
+  ],
+};
+
+function safeParse(value, fallback) {
+  try { return value ? JSON.parse(value) : fallback; } catch { return fallback; }
+}
+function uid(prefix) { return `${prefix}-${new Date().getFullYear()}-${Math.floor(1000 + Math.random() * 8999)}`; }
+function numeric(value) { if (typeof value === 'number') return value; const cleaned = String(value || '').replace(/[^0-9-]/g, ''); return Number(cleaned || 0); }
+function parseDateOnly(value) { if (!value) return null; const parsed = new Date(`${value}T00:00:00`); if (!Number.isNaN(parsed.getTime())) return parsed; const fallback = new Date(value); return Number.isNaN(fallback.getTime()) ? null : fallback; }
+function daysUntil(value) { const target = parseDateOnly(value); if (!target) return null; const start = new Date(); start.setHours(0,0,0,0); target.setHours(0,0,0,0); return Math.ceil((target.getTime() - start.getTime()) / 86400000); }
+function overdueLevel(date, redDays = 30, amberDays = 60) { const days = daysUntil(date); if (days === null) return { level: 'slate', label: 'Tidak ada tanggal', days }; if (days < 0) return { level: 'red', label: `Lewat ${Math.abs(days)} hari`, days }; if (days <= redDays) return { level: 'red', label: `${days} hari lagi`, days }; if (days <= amberDays) return { level: 'amber', label: `${days} hari lagi`, days }; return { level: 'green', label: `${days} hari lagi`, days }; }
+function stnkInfo(asset = {}) { if (asset.kategori && asset.kategori !== 'Kendaraan') return { due: false, level: 'slate', label: 'Tidak wajib', message: 'STNK hanya untuk kendaraan', days: null }; const info = overdueLevel(asset.tanggalSTNK, 30, 60); if (info.days === null) return { due: true, level: 'amber', label: 'STNK belum diisi', message: 'Lengkapi tanggal masa berlaku STNK', days: null }; if (info.days < 0) return { due: true, level: 'red', label: 'STNK expired', message: `STNK lewat ${Math.abs(info.days)} hari. Segera perpanjang.`, days: info.days }; if (info.days <= 30) return { due: true, level: 'red', label: 'Perpanjang STNK', message: `STNK habis dalam ${info.days} hari. Perpanjang maksimal bulan ini.`, days: info.days }; if (info.days <= 60) return { due: false, level: 'amber', label: 'Pantau STNK', message: `STNK habis dalam ${info.days} hari. Siapkan dokumen.`, days: info.days }; return { due: false, level: 'green', label: 'STNK aman', message: `STNK masih ${info.days} hari.`, days: info.days }; }
+function riskClass(risk) { if (Number(risk) >= 70) return 'red'; if (Number(risk) >= 35) return 'amber'; return 'green'; }
+function normalizeHeader(header) { return String(header || '').toLowerCase().trim().replace(/[._-]+/g, ' ').replace(/\s+/g, ' '); }
+function findValue(row, names) { const normalized = Object.entries(row || {}).reduce((acc, [key, value]) => { acc[normalizeHeader(key)] = value; return acc; }, {}); for (const name of names) { const value = normalized[normalizeHeader(name)]; if (value !== undefined && value !== null && String(value).trim() !== '') return value; } return ''; }
+function formatDateValue(value) { if (!value) return ''; if (value instanceof Date && !Number.isNaN(value.getTime())) return value.toISOString().slice(0, 10); if (typeof value === 'number') { const parsed = XLSX.SSF.parse_date_code(value); if (parsed) return `${parsed.y}-${String(parsed.m).padStart(2, '0')}-${String(parsed.d).padStart(2, '0')}`; } const text = String(value).trim(); const parsed = new Date(text); if (!Number.isNaN(parsed.getTime())) return parsed.toISOString().slice(0, 10); return text; }
+function formatBpkb(value) { const text = String(value || '').toLowerCase().trim(); if (['ya', 'y', 'yes', 'true', 'ada', '1', 'memiliki'].includes(text)) return 'Ya'; if (['tidak', 'no', 'false', '0', 'belum', 'tidak ada'].includes(text)) return 'Tidak'; return value ? String(value) : 'Belum diisi'; }
+function normalizeAsset(asset = {}) { const kategori = asset.kategori || 'Kendaraan'; const kode = kategori === 'Kendaraan' ? 'KND' : kategori === 'Perangkat IT' ? 'IT' : 'AST'; const id = asset.id || `AST-${kode}-${new Date().getFullYear()}-${Math.floor(1000 + Math.random() * 8999)}`; const tanggalSTNKValue = asset.tanggalSTNK || asset.tanggalStnk || ''; const stnk = stnkInfo({ kategori, tanggalSTNK: tanggalSTNKValue }); const risikoAwal = Number(asset.risiko ?? 10); const risikoFinal = kategori === 'Kendaraan' && stnk.due ? Math.max(risikoAwal, stnk.level === 'red' ? 82 : 45) : risikoAwal; return { id, nama: asset.nama || 'Aset Baru', kategori, tipe: asset.tipe || 'Aset Rental', status: asset.status || 'Tersedia', kondisi: asset.kondisi || 'Baik', cabang: asset.cabang || asset.wilayah || '-', lokasi: asset.lokasi || asset.wilayah || '-', pemegang: asset.pemegang || asset.perusahaanUser || 'Belum ditugaskan', perusahaanUser: asset.perusahaanUser || asset.pemegang || 'Belum diisi', alamatUser: asset.alamatUser || '-', wilayah: asset.wilayah || asset.cabang || '-', warna: asset.warna || '-', tahunKendaraan: asset.tahunKendaraan || asset.tahun || '-', nomorRangka: asset.nomorRangka || '-', nomorMesin: asset.nomorMesin || '-', nomorPolisi: asset.nomorPolisi || '-', qrCode: asset.qrCode || `QR-AERIZEN-${id}`, tanggalSTNK: tanggalSTNKValue, tanggalKIR: asset.tanggalKIR || '', tanggalPajak: asset.tanggalPajak || '', tanggalAsuransi: asset.tanggalAsuransi || '', tanggalServiceBerikutnya: asset.tanggalServiceBerikutnya || '', memilikiBPKB: asset.memilikiBPKB || asset.memilikiBpkb || 'Belum diisi', gambar: asset.gambar || '', risiko: risikoFinal, utilisasi: Number(asset.utilisasi ?? 0), nilaiBuku: numeric(asset.nilaiBuku), pendapatanBulanan: numeric(asset.pendapatanBulanan || asset.pendapatan), biayaBulanan: numeric(asset.biayaBulanan || asset.biaya), aksiBerikutnya: asset.aksiBerikutnya || (kategori === 'Kendaraan' && stnk.due ? stnk.message : 'Belum ada aksi berikutnya'), dokumen: asset.dokumen || `STNK: ${tanggalSTNKValue || 'Belum diisi'} · BPKB: ${asset.memilikiBPKB || asset.memilikiBpkb || 'Belum diisi'}`, telemetri: asset.telemetri || 'Belum tersambung', alur: asset.alur || 'Tersedia → Dipesan → Digunakan → Kembali', riwayat: Array.isArray(asset.riwayat) && asset.riwayat.length ? asset.riwayat : ['Terdaftar'], updatedAt: new Date().toISOString() }; }
+function normalizeWorkOrder(wo, asset) { return { id: wo.id || uid('WO'), asetId: wo.asetId || asset?.id || '', namaAset: wo.namaAset || asset?.nama || '', nopol: wo.nopol || asset?.nomorPolisi || '-', jenis: wo.jenis || 'Preventive Maintenance', prioritas: wo.prioritas || 'Sedang', status: wo.status || 'Draft', pic: wo.pic || 'Belum ditugaskan', vendorId: wo.vendorId || '', tanggalMulai: wo.tanggalMulai || today, jatuhTempo: wo.jatuhTempo || today, tanggalSelesai: wo.tanggalSelesai || (['Selesai', 'Ditutup'].includes(wo.status) ? today : ''), biaya: numeric(wo.biaya ?? wo.estimasiBiaya), sparepart: wo.sparepart || '', fotoBefore: wo.fotoBefore || 'Belum diunggah', fotoAfter: wo.fotoAfter || 'Belum diunggah', keluhan: wo.keluhan || '', checklist: wo.checklist || 'Inspeksi awal, foto evidence, update progress, QC akhir', updatedAt: new Date().toISOString() }; }
+function detectHeaderRows(worksheet) { const grid = XLSX.utils.sheet_to_json(worksheet, { header: 1, defval: '', raw: false }); const headerIndex = grid.findIndex((row) => row.some((cell) => normalizeHeader(cell).includes('nama kendaraan'))); if (headerIndex >= 0) { const headers = grid[headerIndex].map((cell) => String(cell || '').trim()); return grid.slice(headerIndex + 1).filter((row) => row.some((cell) => String(cell || '').trim() !== '')).map((row) => Object.fromEntries(headers.map((header, index) => [header, row[index] ?? '']))); } return XLSX.utils.sheet_to_json(worksheet, { defval: '', raw: false }); }
+function assetFromImportRow(row, index) { const no = findValue(row, ['no', 'nomor', 'no.']); const nama = String(findValue(row, ['nama kendaraan', 'kendaraan', 'nama aset', 'nama']) || `Kendaraan Sewa ${index + 1}`); const nomorRangka = String(findValue(row, ['nomor rangka', 'no rangka', 'vin']) || '-'); const nomorPolisi = String(findValue(row, ['nomor polisi', 'no polisi', 'nopol', 'plat nomor']) || '-'); const perusahaanUser = String(findValue(row, ['perusahaan user', 'perusahaan', 'customer']) || 'Belum diisi'); const wilayah = String(findValue(row, ['wilayah', 'area', 'region', 'cabang']) || '-'); const tanggalSTNK = formatDateValue(findValue(row, ['tanggal STNK', 'tanggal stnk', 'stnk', 'masa berlaku stnk', 'expired stnk'])); const kodeUnik = nomorRangka !== '-' ? nomorRangka.slice(-6).toUpperCase() : String(no || index + 1).padStart(4, '0'); return normalizeAsset({ id: `AST-KND-SEWA-${kodeUnik}`, nama, kategori: 'Kendaraan', tipe: 'Aset Rental', status: 'Disewakan', kondisi: 'Baik', cabang: wilayah, lokasi: wilayah, pemegang: perusahaanUser, perusahaanUser, alamatUser: String(findValue(row, ['alamat user', 'alamat']) || '-'), wilayah, warna: String(findValue(row, ['warna']) || '-'), tahunKendaraan: String(findValue(row, ['tahun kendaraan', 'tahun']) || '-'), nomorRangka, nomorMesin: String(findValue(row, ['nomor mesin', 'no mesin']) || '-'), nomorPolisi, tanggalSTNK, memilikiBPKB: formatBpkb(findValue(row, ['memiliki BPKB', 'bpkb'])), tanggalKIR: formatDateValue(findValue(row, ['tanggal KIR', 'kir'])), tanggalPajak: formatDateValue(findValue(row, ['tanggal pajak', 'pajak'])), tanggalAsuransi: formatDateValue(findValue(row, ['tanggal asuransi', 'asuransi'])), utilisasi: 80, risiko: tanggalSTNK ? 18 : 45, riwayat: ['Import Excel', 'Validasi Kendaraan Sewa'] }); }
+
+function asArray(value, fallback = []) { return Array.isArray(value) ? value : fallback; }
+const defaultSettings = { supabaseUrl: import.meta.env.VITE_SUPABASE_URL || '', supabaseKey: import.meta.env.VITE_SUPABASE_ANON_KEY || '', workspace: 'aerizen-main', accountEmail: '', accountPassword: '', loggedInUser: '', role: 'Super Admin', realtime: true, autoSync: true };
+function loadState() {
+  const stored = safeParse(localStorage.getItem(STORAGE_KEY), null);
+  if (!stored || typeof stored !== 'object') return initialState;
+  const migratedAssets = asArray(stored.assets, initialState.assets).map((asset) => normalizeAsset(asset));
+  return {
+    ...initialState,
+    ...stored,
+    assets: migratedAssets,
+    workOrders: asArray(stored.workOrders, initialState.workOrders).map((wo) => normalizeWorkOrder(wo, migratedAssets.find((asset) => asset.id === wo.asetId))),
+    contracts: asArray(stored.contracts, initialState.contracts),
+    invoices: asArray(stored.invoices, initialState.invoices),
+    checklists: asArray(stored.checklists, initialState.checklists),
+    inventory: asArray(stored.inventory, initialState.inventory),
+    vendors: asArray(stored.vendors, initialState.vendors),
+    tickets: asArray(stored.tickets, initialState.tickets),
+    documents: asArray(stored.documents, initialState.documents),
+    approvals: asArray(stored.approvals, initialState.approvals),
+    roles: asArray(stored.roles, initialState.roles),
+    auditLogs: asArray(stored.auditLogs, initialState.auditLogs),
+  };
+}
+function loadSettings() {
+  const stored = safeParse(localStorage.getItem(SETTINGS_KEY), {});
+  return { ...defaultSettings, ...(stored && typeof stored === 'object' ? stored : {}) };
+}
+
+function useLocalState() {
+  const [state, setState] = useState(loadState);
+  const [settings, setSettings] = useState(loadSettings);
+  const [queue, setQueue] = useState(() => asArray(safeParse(localStorage.getItem(QUEUE_KEY), []), []));
+  useEffect(() => localStorage.setItem(STORAGE_KEY, JSON.stringify(state)), [state]);
+  useEffect(() => localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings)), [settings]);
+  useEffect(() => localStorage.setItem(QUEUE_KEY, JSON.stringify(queue)), [queue]);
+  return { state, setState, settings, setSettings, queue, setQueue };
+}
+
+function App() {
+  const { state, setState, settings, setSettings, queue, setQueue } = useLocalState();
+  const [active, setActive] = useState(() => { const hash = window.location.hash.replace('#', ''); return tabs.some(([key]) => key === hash) ? hash : 'dashboard'; });
+  const [query, setQuery] = useState('');
+  const [filter, setFilter] = useState('Semua');
+  const [selectedAsset, setSelectedAsset] = useState(null);
+  const [assetForm, setAssetForm] = useState(null);
+  const [workOrderForm, setWorkOrderForm] = useState(null);
+  const [notice, setNotice] = useState('');
+  const [syncStatus, setSyncStatus] = useState('Offline + Supabase siap. Data aman di storage lokal.');
+  const [desktop, setDesktop] = useState(null);
+  const [notificationOpen, setNotificationOpen] = useState(false);
+  const channelRef = useRef(null);
+
+  const pageMeta = {
+    dashboard: ['Command center', 'Dashboard Enterprise', 'Ringkasan risiko, STNK, profit, SLA, kontrak, ticket, dan notifikasi utama.'],
+    assets: ['Master data', 'Data Aset', 'Tambah, edit, hapus, upload foto, import Excel kendaraan sewa, QR asset, dan Detail Aset 360.'],
+    contracts: ['Rental lifecycle', 'Kontrak Sewa', 'Kontrak customer, periode sewa, deposit, renewal, dokumen, dan status unit.'],
+    operations: ['Field operation', 'Check-in / Check-out', 'Serah-terima, inspeksi kendaraan/perangkat, foto before-after, aksesoris, dan tanda tangan digital.'],
+    maintenance: ['Work order', 'Maintenance', 'Work Order, biaya aktual, history per nopol, foto before/after, sparepart, vendor, dan klik Selesai.'],
+    finance: ['Billing', 'Finance & Invoice', 'Invoice bulanan, status pembayaran, profit aset, revenue customer, dan export Excel.'],
+    inventory: ['Sparepart', 'Inventory Sparepart', 'Stok oli, ban, aki, charger, adapter, minimum stock, vendor, dan nilai persediaan.'],
+    vendors: ['Supplier performance', 'Vendor Management', 'Database bengkel, supplier IT, rating, biaya rata-rata, lead time, dan performa vendor.'],
+    tickets: ['SLA support', 'Ticket & Complaint', 'Keluhan customer/internal, prioritas, SLA, PIC, status, dan tindak lanjut.'],
+    documents: ['Digital vault', 'Dokumen Aset', 'STNK, BPKB, KIR, asuransi, garansi IT, kontrak, invoice service, dan dokumen serah terima.'],
+    approvals: ['Control tower', 'Approval & Permission', 'Role, permission, approval matrix, limit biaya, pending approval, dan kontrol akses user.'],
+    reports: ['Audit & export', 'Laporan', 'Audit trail, backup/restore, export Excel, dan laporan management.'],
+    account: ['Autentikasi', 'Akun', 'Login/logout, lupa password, lihat password, role aktif, dan reset password Supabase.'],
+    configuration: ['Integrasi', 'Konfigurasi', 'Offline-first, Supabase realtime, workspace, queue sync, SQL, dan reset data demo.'],
+  };
+
+  const supabase = useMemo(() => { if (!settings.supabaseUrl || !settings.supabaseKey) return null; try { return createClient(settings.supabaseUrl, settings.supabaseKey); } catch { return null; } }, [settings.supabaseUrl, settings.supabaseKey]);
+
+  useEffect(() => { if (window.aerizenDesktop?.platform) window.aerizenDesktop.platform().then(setDesktop).catch(() => setDesktop(null)); }, []);
+  useEffect(() => { const onHashChange = () => { const hash = window.location.hash.replace('#', ''); if (tabs.some(([key]) => key === hash)) setActive(hash); }; window.addEventListener('hashchange', onHashChange); return () => window.removeEventListener('hashchange', onHashChange); }, []);
+  useEffect(() => { if (window.location.hash !== `#${active}`) window.location.hash = active; }, [active]);
+
+  const addLog = (aksi, detail) => setState((prev) => ({ ...prev, auditLogs: [{ id: uid('LOG'), waktu: new Date().toISOString(), aksi, detail, user: settings.loggedInUser || 'Admin Aerizen' }, ...(prev.auditLogs || [])].slice(0, 200) }));
+  const queueSync = (collection, item, action = 'upsert') => setQueue((prev) => [{ id: uid('SYNC'), collection, action, payload: item, createdAt: new Date().toISOString() }, ...prev].slice(0, 500));
+  const upsertLocal = (collection, item, doSync = true) => { setState((prev) => { const list = prev[collection] || []; const exists = list.some((row) => row.id === item.id); return { ...prev, [collection]: exists ? list.map((row) => row.id === item.id ? item : row) : [item, ...list] }; }); if (doSync) queueSync(collection, item, 'upsert'); };
+  const deleteLocal = (collection, id) => { setState((prev) => ({ ...prev, [collection]: (prev[collection] || []).filter((row) => row.id !== id) })); queueSync(collection, { id }, 'delete'); addLog(`Delete ${collection}`, id); };
+
+  const notifications = useMemo(() => buildNotifications(state), [state]);
+  const metrics = useMemo(() => buildMetrics(state, notifications), [state, notifications]);
+  const filteredAssets = useMemo(() => { const text = query.toLowerCase(); return (state.assets || []).filter((asset) => { const matchFilter = filter === 'Semua' || asset.kategori === filter || asset.status === filter || asset.cabang === filter; const matchQuery = [asset.nama, asset.id, asset.pemegang, asset.cabang, asset.nomorPolisi, asset.nomorRangka, asset.nomorMesin, asset.wilayah, asset.qrCode].join(' ').toLowerCase().includes(text); return matchFilter && matchQuery; }); }, [state.assets, query, filter]);
+  const filterOptions = useMemo(() => { const dynamic = new Set(['Semua', ...categoryOptions, ...statusOptions]); (state.assets || []).forEach((asset) => dynamic.add(asset.cabang)); return Array.from(dynamic).filter(Boolean); }, [state.assets]);
+
+  async function processSyncQueue() {
+    if (!supabase) { setSyncStatus('Supabase belum dikonfigurasi. Data tetap aman di offline storage.'); return; }
+    if (!navigator.onLine) { setSyncStatus('Perangkat offline. Perubahan masuk antrean sync.'); return; }
+    const items = [...queue].reverse();
+    if (!items.length) { setSyncStatus('Tidak ada antrean yang perlu dikirim.'); return; }
+    setSyncStatus(`Mengirim ${items.length} perubahan ke Supabase...`);
+    for (const item of items) {
+      const row = { id: `${item.collection}:${item.payload.id}`, collection: item.collection, payload: item.payload, updated_at: new Date().toISOString(), deleted_at: item.action === 'delete' ? new Date().toISOString() : null };
+      const { error } = await supabase.from('aerizen_records').upsert(row);
+      if (error) { setSyncStatus(`Gagal sinkron ${item.payload.id}: ${error.message}`); return; }
+    }
+    setQueue([]); setSyncStatus(`${items.length} perubahan berhasil dikirim ke Supabase.`);
+  }
+  async function pullSupabase() { if (!supabase) { setSyncStatus('Isi Supabase URL dan anon key dulu.'); return; } const { data, error } = await supabase.from('aerizen_records').select('*').is('deleted_at', null).order('updated_at', { ascending: false }); if (error) { setSyncStatus(`Gagal pull: ${error.message}`); return; } const next = { ...state }; for (const row of data || []) { const list = next[row.collection] || []; const exists = list.some((item) => item.id === row.payload.id); next[row.collection] = exists ? list.map((item) => item.id === row.payload.id ? row.payload : item) : [row.payload, ...list]; } setState(next); setSyncStatus(`${data?.length || 0} record dibaca dari Supabase.`); }
+  async function loginAccount() { if (!settings.accountEmail || !settings.accountPassword) { setNotice('Isi email akun dan password terlebih dahulu.'); return; } if (!supabase) { setSettings((prev) => ({ ...prev, loggedInUser: prev.accountEmail })); setNotice('Supabase belum diatur. Login disimpan lokal untuk demo.'); return; } const { data, error } = await supabase.auth.signInWithPassword({ email: settings.accountEmail, password: settings.accountPassword }); if (error) { setNotice(`Login gagal: ${error.message}`); return; } setSettings((prev) => ({ ...prev, loggedInUser: data.user?.email || prev.accountEmail, accountPassword: '' })); setNotice(`Login berhasil sebagai ${data.user?.email || settings.accountEmail}.`); }
+  async function logoutAccount() { if (supabase) await supabase.auth.signOut().catch(() => null); setSettings((prev) => ({ ...prev, loggedInUser: '', accountPassword: '' })); setNotice('Akun berhasil logout.'); }
+  async function sendPasswordReset(email) { const targetEmail = String(email || settings.accountEmail || '').trim(); if (!targetEmail) { setNotice('Isi email akun terlebih dahulu untuk mengirim link lupa password.'); return; } if (!supabase) { setNotice('Fitur lupa password membutuhkan Supabase URL dan anon key di menu Konfigurasi.'); return; } const redirectTo = window.location.protocol.startsWith('http') ? `${window.location.origin}${window.location.pathname}#account` : undefined; const { error } = await supabase.auth.resetPasswordForEmail(targetEmail, redirectTo ? { redirectTo } : undefined); if (error) { setNotice(`Gagal mengirim link reset password: ${error.message}`); return; } setNotice(`Link reset password berhasil dikirim ke ${targetEmail}. Cek inbox/spam email tersebut.`); }
+  async function updateAccountPassword(newPassword, confirmPassword) { if (!newPassword || !confirmPassword) { setNotice('Isi password baru dan konfirmasi password.'); return; } if (newPassword.length < 6) { setNotice('Password baru minimal 6 karakter.'); return; } if (newPassword !== confirmPassword) { setNotice('Konfirmasi password tidak sama.'); return; } if (!supabase) { setNotice('Update password membutuhkan Supabase. Isi konfigurasi Supabase terlebih dahulu.'); return; } const { data, error } = await supabase.auth.updateUser({ password: newPassword }); if (error) { setNotice(`Gagal update password: ${error.message}. Buka link reset dari email terlebih dahulu, lalu coba lagi.`); return; } setSettings((prev) => ({ ...prev, loggedInUser: data.user?.email || prev.loggedInUser, accountPassword: '' })); setNotice('Password akun berhasil diperbarui. Silakan login ulang jika sesi berakhir.'); }
+
+  useEffect(() => { if (!supabase || !settings.realtime) return undefined; if (channelRef.current) supabase.removeChannel(channelRef.current); const channel = supabase.channel('aerizen-records-realtime').on('postgres_changes', { event: '*', schema: 'public', table: 'aerizen_records' }, (payload) => { const nextRecord = payload.new; if (!nextRecord?.payload || nextRecord.deleted_at) return; upsertLocal(nextRecord.collection, nextRecord.payload, false); setSyncStatus(`Realtime update: ${nextRecord.collection} / ${nextRecord.payload.id}`); }).subscribe(); channelRef.current = channel; return () => supabase.removeChannel(channel); }, [supabase, settings.realtime]);
+  useEffect(() => { if (!supabase) return undefined; const { data } = supabase.auth.onAuthStateChange((event, session) => { if (event === 'PASSWORD_RECOVERY') { setActive('account'); setSettings((prev) => ({ ...prev, loggedInUser: session?.user?.email || prev.loggedInUser })); setNotice('Mode reset password aktif. Masukkan password baru di halaman Akun, lalu klik Simpan Password Baru.'); } if (event === 'SIGNED_IN' && session?.user?.email) setSettings((prev) => ({ ...prev, loggedInUser: session.user.email })); }); return () => data.subscription.unsubscribe(); }, [supabase]);
+  useEffect(() => { if (!settings.autoSync) return undefined; const timer = window.setInterval(() => { if (queue.length && navigator.onLine && supabase) processSyncQueue(); }, 10000); return () => window.clearInterval(timer); }, [queue, settings.autoSync, supabase]);
+
+  async function importExcel(file) { if (!file) return; try { const buffer = await file.arrayBuffer(); const workbook = XLSX.read(buffer, { type: 'array', cellDates: true }); const worksheet = workbook.Sheets[workbook.SheetNames[0]]; const rows = detectHeaderRows(worksheet); const imported = rows.filter((row) => Object.values(row).some((v) => String(v || '').trim() !== '')).map(assetFromImportRow); if (!imported.length) { setNotice('File tidak memiliki data yang bisa diimpor. Pastikan header sesuai template.'); return; } setState((prev) => { const ids = new Set((prev.assets || []).map((item) => item.id)); const unique = imported.map((asset, index) => ids.has(asset.id) ? { ...asset, id: `${asset.id}-${index + 1}` } : asset); unique.forEach((asset) => queueSync('assets', asset, 'upsert')); return { ...prev, assets: [...unique, ...(prev.assets || [])] }; }); addLog('Import Excel Kendaraan Sewa', `${imported.length} kendaraan sewa diimpor dari ${file.name}`); setNotice(`${imported.length} kendaraan sewa berhasil diimpor dari ${file.name}.`); } catch (error) { setNotice(`Import gagal: ${error.message || 'format file tidak terbaca'}`); } }
+  function saveAsset(form) { const asset = normalizeAsset(form); upsertLocal('assets', asset); addLog(form.id ? 'Update aset' : 'Tambah aset', `${asset.id} - ${asset.nama}`); setAssetForm(null); setSelectedAsset(asset); setNotice(`Aset ${asset.nama} berhasil disimpan.`); }
+  function saveWorkOrder(form) { const asset = (state.assets || []).find((item) => item.id === form.asetId); const completeStatus = ['Selesai', 'Ditutup'].includes(form.status); const wo = normalizeWorkOrder({ ...form, nopol: form.nopol || asset?.nomorPolisi, tanggalSelesai: completeStatus ? (form.tanggalSelesai || today) : '' }, asset); upsertLocal('workOrders', wo); if (asset && !['Draft', 'Selesai', 'Ditutup'].includes(wo.status)) upsertLocal('assets', normalizeAsset({ ...asset, status: 'Maintenance', aksiBerikutnya: `${wo.jenis} - ${wo.status}`, riwayat: [...(asset.riwayat || []), `Work Order ${wo.id}`] })); if (asset && ['Selesai', 'Ditutup'].includes(wo.status) && ['Maintenance', 'Perbaikan', 'Overdue'].includes(asset.status)) upsertLocal('assets', normalizeAsset({ ...asset, status: 'Tersedia', kondisi: asset.kondisi === 'Perlu Servis' ? 'Baik' : asset.kondisi, aksiBerikutnya: `Maintenance selesai ${wo.tanggalSelesai || today}`, riwayat: [...(asset.riwayat || []), `Work Order ${wo.id} selesai`] })); addLog('Work Order', `${wo.id} untuk ${wo.namaAset}, Nominal Biaya Aktual ${currency.format(numeric(wo.biaya))}`); setWorkOrderForm(null); setNotice(`Work Order ${wo.id} berhasil disimpan.`); }
+  function completeWorkOrder(woId) { const existing = (state.workOrders || []).find((item) => item.id === woId); if (!existing) { setNotice('Work Order tidak ditemukan.'); return; } if (['Selesai', 'Ditutup'].includes(existing.status)) { setNotice(`Work Order ${woId} sudah selesai.`); return; } const asset = (state.assets || []).find((item) => item.id === existing.asetId); const completed = normalizeWorkOrder({ ...existing, status: 'Selesai', tanggalSelesai: today, fotoAfter: existing.fotoAfter || 'Ada' }, asset); upsertLocal('workOrders', completed); if (asset && ['Maintenance', 'Perbaikan', 'Overdue'].includes(asset.status)) upsertLocal('assets', normalizeAsset({ ...asset, status: 'Tersedia', kondisi: asset.kondisi === 'Perlu Servis' ? 'Baik' : asset.kondisi, aksiBerikutnya: `Maintenance selesai ${today}. Siap digunakan.`, riwayat: [...(asset.riwayat || []), `Work Order ${completed.id} selesai`] })); addLog('Selesai maintenance', `${completed.id} selesai untuk ${completed.namaAset} (${completed.nopol})`); setNotice(`Maintenance ${completed.id} ditandai selesai tanpa membuka form Work Order.`); }
+  function markInvoicePaid(invoiceId) { const inv = (state.invoices || []).find((item) => item.id === invoiceId); if (!inv) return; const paid = { ...inv, paid: numeric(inv.amount), status: 'Paid' }; upsertLocal('invoices', paid); addLog('Invoice paid', `${paid.id} dilunasi ${currency.format(paid.amount)}`); setNotice(`${paid.id} ditandai lunas.`); }
+  function closeTicket(ticketId) { const ticket = (state.tickets || []).find((item) => item.id === ticketId); if (!ticket) return; upsertLocal('tickets', { ...ticket, status: 'Closed' }); addLog('Ticket closed', ticketId); setNotice(`${ticketId} ditutup.`); }
+  function approveRule(approvalId) { const item = (state.approvals || []).find((row) => row.id === approvalId); if (!item) return; const pending = Math.max(0, numeric(item.pending) - 1); upsertLocal('approvals', { ...item, pending: String(pending) }); addLog('Approval', `${approvalId} disetujui`); setNotice(`${approvalId} disetujui.`); }
+  function exportBackup() { const blob = new Blob([JSON.stringify(state, null, 2)], { type: 'application/json' }); const url = URL.createObjectURL(blob); const anchor = document.createElement('a'); anchor.href = url; anchor.download = `aerizen-v3-backup-${today}.json`; anchor.click(); URL.revokeObjectURL(url); }
+  async function restoreBackup(file) { if (!file) return; const text = await file.text(); const restored = safeParse(text, null); if (!restored?.assets) { setNotice('File backup tidak valid.'); return; } setState(restored); setNotice('Backup berhasil direstore ke offline storage.'); addLog('Restore backup', file.name); }
+  function resetDemo() { setState(initialState); setQueue([]); setNotice('Data demo Aerizen v3.0 dikembalikan ke awal.'); }
+  function exportCollection(collection, filename) { const rows = state[collection] || []; const ws = XLSX.utils.json_to_sheet(rows); const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, ws, collection); XLSX.writeFile(wb, `${filename}-${today}.xlsx`); addLog('Export Excel', filename); }
+  function saveConfiguration() { setNotice('Konfigurasi berhasil disimpan.'); }
+
+  const [eyebrow, title, description] = pageMeta[active] || pageMeta.dashboard;
+
+  return (
+    <div className="workspace-shell enterprise-v3">
+      <header className="workspace-header">
+        <div className="workspace-top">
+          <div className="brand"><div className="brand-mark">A</div><div><strong>Aerizen</strong><span>Enterprise Asset OS</span></div></div>
+          <div className="header-right"><div className="header-status"><span className={`pill ${navigator.onLine ? 'green' : 'amber'}`}>{navigator.onLine ? 'Online' : 'Offline'}</span><span className="pill blue">Queue: {queue.length}</span><span className="pill slate">Workspace: {settings.workspace || 'aerizen-main'}</span><span className="pill purple">Role: {settings.role || 'Super Admin'}</span><span className="muted">{desktop?.packaged ? 'EXE mode' : 'Development mode'}</span></div><NotificationBell notifications={notifications} open={notificationOpen} setOpen={setNotificationOpen} setActive={setActive} /></div>
+        </div>
+        <div className="nav-frame"><nav className="top-nav enterprise-nav">{tabs.map(([key, label]) => <button key={key} className={active === key ? 'active' : ''} onClick={() => setActive(key)}>{label}</button>)}</nav></div>
+      </header>
+      <main className="workspace-main">
+        <div className="page-header"><div><p className="eyebrow">{eyebrow}</p><h1>{title}</h1><p className="page-description">{description}</p></div><div className="top-actions">{active === 'assets' && <button className="btn primary" onClick={() => setAssetForm({})}>Tambah Aset</button>}{active === 'maintenance' && <button className="btn primary" onClick={() => setWorkOrderForm({ asetId: state.assets?.[0]?.id || '', namaAset: state.assets?.[0]?.nama || '' })}>Buat WO</button>}{active === 'reports' && <button className="btn ghost" onClick={exportBackup}>Export Backup</button>}{active === 'reports' && <label className="btn ghost">Restore JSON<input type="file" accept=".json" onChange={(e) => restoreBackup(e.target.files?.[0])} hidden /></label>}{active === 'configuration' && <button className="btn primary" onClick={processSyncQueue}>Sinkronkan Sekarang</button>}</div></div>
+        {notice && <div className="notice"><span>{notice}</span><button onClick={() => setNotice('')}>×</button></div>}
+        {active === 'dashboard' && <Dashboard metrics={metrics} state={state} notifications={notifications} onOpenNotifications={() => setNotificationOpen(true)} />}
+        {active === 'assets' && <AssetsView assets={filteredAssets} query={query} setQuery={setQuery} filter={filter} setFilter={setFilter} filterOptions={filterOptions} importExcel={importExcel} onDetail={setSelectedAsset} onEdit={setAssetForm} onWO={(a) => setWorkOrderForm({ asetId: a.id, namaAset: a.nama })} onDelete={(id) => deleteLocal('assets', id)} />}
+        {active === 'contracts' && <ContractsView contracts={state.contracts || []} assets={state.assets || []} exportExcel={() => exportCollection('contracts', 'kontrak-sewa')} />}
+        {active === 'operations' && <OperationsView checklists={state.checklists || []} assets={state.assets || []} onExport={() => exportCollection('checklists', 'check-in-out-inspection')} />}
+        {active === 'maintenance' && <MaintenanceView workOrders={state.workOrders || []} assets={state.assets || []} vendors={state.vendors || []} onCreate={(asset) => setWorkOrderForm({ asetId: asset.id, namaAset: asset.nama })} onEdit={setWorkOrderForm} onComplete={completeWorkOrder} />}
+        {active === 'finance' && <FinanceView invoices={state.invoices || []} assets={state.assets || []} contracts={state.contracts || []} onPaid={markInvoicePaid} onExport={() => exportCollection('invoices', 'billing-invoice')} />}
+        {active === 'inventory' && <InventoryView inventory={state.inventory || []} onExport={() => exportCollection('inventory', 'inventory-sparepart')} />}
+        {active === 'vendors' && <VendorView vendors={state.vendors || []} workOrders={state.workOrders || []} onExport={() => exportCollection('vendors', 'vendor-management')} />}
+        {active === 'tickets' && <TicketView tickets={state.tickets || []} onCloseTicket={closeTicket} onExport={() => exportCollection('tickets', 'ticket-sla')} />}
+        {active === 'documents' && <DocumentsView documents={state.documents || []} assets={state.assets || []} onExport={() => exportCollection('documents', 'dokumen-aset')} />}
+        {active === 'approvals' && <ApprovalsView approvals={state.approvals || []} roles={state.roles || []} onApprove={approveRule} />}
+        {active === 'reports' && <ReportsView state={state} queue={queue} notifications={notifications} onExport={exportBackup} onExportExcel={(collection) => exportCollection(collection, `laporan-${collection}`)} />}
+        {active === 'account' && <AccountView settings={settings} setSettings={setSettings} roles={state.roles || []} onLogin={loginAccount} onLogout={logoutAccount} onForgotPassword={sendPasswordReset} onUpdatePassword={updateAccountPassword} />}
+        {active === 'configuration' && <ConfigurationView settings={settings} setSettings={setSettings} queue={queue} syncStatus={syncStatus} onSave={saveConfiguration} onPush={processSyncQueue} onPull={pullSupabase} onReset={resetDemo} />}
+      </main>
+      {selectedAsset && <AssetDrawer asset={selectedAsset} documents={state.documents || []} workOrders={state.workOrders || []} contracts={state.contracts || []} invoices={state.invoices || []} onClose={() => setSelectedAsset(null)} onEdit={setAssetForm} onWO={(asset) => setWorkOrderForm({ asetId: asset.id, namaAset: asset.nama })} />}
+      {assetForm && <AssetForm asset={assetForm} onClose={() => setAssetForm(null)} onSave={saveAsset} />}
+      {workOrderForm && <WorkOrderForm form={workOrderForm} assets={state.assets || []} vendors={state.vendors || []} onClose={() => setWorkOrderForm(null)} onSave={saveWorkOrder} />}
+    </div>
+  );
+}
+
+function buildMetrics(state, notifications) { const assets = state.assets || []; const total = assets.length; const rented = assets.filter((a) => a.status === 'Disewakan').length; const maintenance = assets.filter((a) => ['Maintenance', 'Perbaikan'].includes(a.status)).length; const highRisk = assets.filter((a) => Number(a.risiko || 0) >= 60).length; const stnkDue = assets.filter((a) => a.kategori === 'Kendaraan' && stnkInfo(a).due).length; const utilization = total ? Math.round(assets.reduce((sum, a) => sum + Number(a.utilisasi || 0), 0) / total) : 0; const revenue = assets.reduce((sum, a) => sum + numeric(a.pendapatanBulanan), 0); const cost = assets.reduce((sum, a) => sum + numeric(a.biayaBulanan), 0); const unpaid = (state.invoices || []).filter((i) => i.status !== 'Paid').reduce((s, i) => s + Math.max(0, numeric(i.amount) - numeric(i.paid)), 0); return { total, rented, maintenance, highRisk, stnkDue, utilization, revenue, cost, profit: revenue - cost, notifications: notifications.filter((n) => n.level === 'red').length, ticketsOpen: (state.tickets || []).filter((t) => t.status !== 'Closed').length, unpaid }; }
+function buildNotifications(state) { const list = []; (state.assets || []).forEach((asset) => { const stnk = stnkInfo(asset); if (stnk.due) list.push({ id: `NTF-STNK-${asset.id}`, type: 'STNK', level: 'red', title: `${asset.nama} perlu perpanjang STNK`, detail: `${asset.nomorPolisi || '-'} · ${stnk.message}`, due: asset.tanggalSTNK, action: 'Perpanjang STNK' }); ['tanggalKIR', 'tanggalPajak', 'tanggalAsuransi', 'tanggalServiceBerikutnya'].forEach((key) => { const label = { tanggalKIR: 'KIR', tanggalPajak: 'Pajak kendaraan', tanggalAsuransi: 'Asuransi', tanggalServiceBerikutnya: 'Service berkala' }[key]; const info = overdueLevel(asset[key], 30, 60); if (info.days !== null && info.days <= 30) list.push({ id: `NTF-${key}-${asset.id}`, type: label, level: info.level, title: `${label} ${asset.nama}`, detail: `${asset.nomorPolisi || asset.nomorRangka || '-'} · ${info.label}`, due: asset[key], action: `Tindak lanjut ${label}` }); }); }); (state.contracts || []).forEach((c) => { const info = overdueLevel(c.selesai, 30, 60); if (info.days !== null && info.days <= 30) list.push({ id: `NTF-CTR-${c.id}`, type: 'Kontrak', level: info.level, title: `Kontrak ${c.customer}`, detail: `${c.aset} · selesai ${info.label}`, due: c.selesai, action: 'Follow up renewal' }); }); (state.invoices || []).filter((i) => i.status !== 'Paid').forEach((i) => { const info = overdueLevel(i.dueDate, 7, 14); if (info.days !== null && info.days <= 14) list.push({ id: `NTF-INV-${i.id}`, type: 'Invoice', level: info.level, title: `Tagihan ${i.customer}`, detail: `${i.id} · sisa ${currency.format(Math.max(0, numeric(i.amount) - numeric(i.paid)))} · ${info.label}`, due: i.dueDate, action: 'Follow up pembayaran' }); }); (state.tickets || []).filter((t) => t.status !== 'Closed').forEach((t) => { const info = overdueLevel(t.sla, 1, 3); if (info.days !== null && info.days <= 3) list.push({ id: `NTF-TCK-${t.id}`, type: 'Ticket SLA', level: t.prioritas === 'Tinggi' || info.level === 'red' ? 'red' : 'amber', title: `${t.id} SLA ${t.customer}`, detail: `${t.aset} · ${t.status} · ${info.label}`, due: t.sla, action: 'Selesaikan ticket' }); }); (state.approvals || []).filter((a) => numeric(a.pending) > 0).forEach((a) => list.push({ id: `NTF-APR-${a.id}`, type: 'Approval', level: 'amber', title: `${a.proses} menunggu approval`, detail: `${a.pending} item pending · ${a.approval}`, due: today, action: 'Review approval' })); return list.sort((a, b) => (a.level === 'red' ? -1 : 1) - (b.level === 'red' ? -1 : 1)); }
+
+function notificationTarget(type) {
+  if (['STNK', 'KIR', 'Pajak kendaraan', 'Asuransi', 'Service berkala'].includes(type)) return 'assets';
+  if (type === 'Invoice') return 'finance';
+  if (type === 'Kontrak') return 'contracts';
+  if (type === 'Ticket SLA') return 'tickets';
+  if (type === 'Approval') return 'approvals';
+  return 'dashboard';
+}
+
+function NotificationBell({ notifications, open, setOpen, setActive }) {
+  const redCount = notifications.filter((n) => n.level === 'red').length;
+  const topItems = notifications.slice(0, 10);
+  const goTo = (type) => { setActive(notificationTarget(type)); setOpen(false); };
+  return <div className="notification-bell-wrap"><button className="notification-bell" title="Notifikasi" onClick={() => setOpen(!open)}><span aria-hidden="true">🔔</span>{notifications.length > 0 && <b className={redCount ? 'danger' : ''}>{redCount || notifications.length}</b>}</button>{open && <div className="notification-popover"><div className="notification-popover-head"><div><p className="eyebrow">Notification Center</p><h3>Lonceng Notifikasi</h3><span>{notifications.length} reminder aktif · {redCount} kritis</span></div><button onClick={() => setOpen(false)}>×</button></div><div className="notification-popover-list">{topItems.length ? topItems.map((item) => <button className={`notification-item ${item.level === 'red' ? 'critical' : ''}`} key={item.id} onClick={() => goTo(item.type)}><div><b>{item.title}</b><span>{item.detail} · due: {item.due || '-'}</span></div><i className={`pill ${item.level}`}>{item.type}</i></button>) : <div className="notification-empty">Tidak ada notifikasi aktif.</div>}</div><div className="notification-popover-foot"><span>Notifikasi tidak lagi berada di menu utama.</span><button className="btn ghost" onClick={() => { setActive('reports'); setOpen(false); }}>Audit & Laporan</button></div></div>}</div>;
+}
+
+
+function Dashboard({ metrics, state, notifications, onOpenNotifications }) { const topAlerts = notifications.slice(0, 7); return <section className="stack"><div className="metrics enterprise-metrics"><Metric label="Total Aset" value={metrics.total} note="Rental + internal" /><Metric label="STNK Perlu Perpanjang" value={metrics.stnkDue} note="Notif merah ≤ 30 hari / expired" tone="danger" /><Metric label="Profit Bulanan" value={currency.format(metrics.profit)} note={`${currency.format(metrics.revenue)} revenue`} tone="success" /><Metric label="Tagihan Belum Lunas" value={currency.format(metrics.unpaid)} note="Invoice unpaid/partial" tone="danger" /><Metric label="Utilisasi" value={`${metrics.utilization}%`} note="Rata-rata seluruh aset" /><Metric label="Ticket Open" value={metrics.ticketsOpen} note="SLA berjalan" /><Metric label="Aset Maintenance" value={metrics.maintenance} note="Unit sedang diperbaiki" /><Metric label="Notif Kritis" value={metrics.notifications} note="Butuh tindakan cepat" tone="danger" /></div><div className="dashboard-grid two"><div className="panel"><div className="panel-head compact"><div><h2>Command Center</h2><p>Dashboard hanya menampilkan tindak lanjut utama. Detail lengkap tetap ada di halaman masing-masing supaya tidak double.</p></div></div><div className="quick-summary"><div><b>{(state.contracts || []).filter((c) => c.status === 'Aktif').length}</b><span>Kontrak aktif</span></div><div><b>{(state.inventory || []).filter((i) => numeric(i.stok) <= numeric(i.min)).length}</b><span>Sparepart minimum</span></div><div><b>{(state.approvals || []).reduce((s, a) => s + numeric(a.pending), 0)}</b><span>Approval pending</span></div></div></div><div className="panel"><div className="panel-head compact"><div><h2>Alert Utama</h2><p>Ringkasan alert tetap di Dashboard. Daftar lengkapnya sekarang lewat ikon lonceng kecil di pojok atas, bukan menu tab.</p></div><button className="btn ghost" onClick={onOpenNotifications}>Buka Lonceng</button></div><div className="alert-list">{topAlerts.map((item) => <div className={`alert-row ${item.level === 'red' ? 'alert-critical' : ''}`} key={item.id}><div><b>{item.title}</b><span>{item.detail}</span></div><span className={`pill ${item.level}`}>{item.type}</span></div>)}</div></div></div></section>; }
+function Metric({ label, value, note, tone = '' }) { return <div className={`metric ${tone}`}><span>{label}</span><b>{value}</b><p>{note}</p></div>; }
+function AssetsView({ assets, query, setQuery, filter, setFilter, filterOptions, importExcel, onDetail, onEdit, onWO, onDelete }) { return <section className="stack"><ImportPanel onImport={importExcel} /><div className="panel"><div className="panel-head"><div><h2>Daftar Aset yang Bisa Diedit</h2><p>Tambah, edit, hapus, upload foto, Import Excel Kendaraan Sewa, QR/Barcode, dan Aset 360 tetap aman.</p></div><div className="filters"><input placeholder="Cari aset, QR, customer, nopol, rangka, wilayah..." value={query} onChange={(e) => setQuery(e.target.value)} /><select value={filter} onChange={(e) => setFilter(e.target.value)}>{filterOptions.map((item) => <option key={item}>{item}</option>)}</select></div></div><div className="asset-grid">{assets.map((asset) => <AssetCard key={asset.id} asset={asset} onDetail={onDetail} onEdit={onEdit} onWO={onWO} onDelete={onDelete} />)}</div></div></section>; }
+function ImportPanel({ onImport }) { return <div className="panel import-panel"><div><p className="eyebrow">Import Excel Kendaraan Sewa</p><h2>Upload data kendaraan sewa dari Excel/CSV</h2><p>Kolom didukung: no, nama kendaraan, warna, tahun kendaraan, nomor rangka, nomor mesin, nomor polisi/nopol, perusahaan user, alamat user, wilayah, tanggal STNK, BPKB, KIR, pajak, asuransi.</p></div><div className="import-actions"><a className="btn ghost" href="/template_import_kendaraan_sewa.xlsx" download>Template XLSX</a><a className="btn ghost" href="/template_import_kendaraan_sewa.csv" download>Template CSV</a><label className="btn primary">Import Excel<input hidden type="file" accept=".xlsx,.xls,.csv" onChange={(e) => onImport(e.target.files?.[0])} /></label></div></div>; }
+function getAssetBpkbNumber(asset) {
+  const raw = String(asset.nomorBPKB || asset.bpkbNumber || asset.id || '').replace(/\D/g, '').slice(-5);
+  return `BPKB - No. ${raw ? raw.padStart(5, '0') : '00123'}`;
+}
+function getContractForAsset(asset, contracts = []) {
+  return contracts.find((contract) => contract.asetId === asset.id || contract.aset === asset.nama) || null;
+}
+function getPaymentSummary(contract, invoices = []) {
+  const related = invoices.filter((invoice) => invoice.contractId === contract?.id);
+  if (!related.length) return { text: 'Belum ada invoice', status: 'Menunggu', tone: 'amber' };
+  const paid = related.filter((invoice) => invoice.status === 'Paid').length;
+  const text = `${paid}/${related.length} invoice lunas`;
+  const allPaid = paid === related.length;
+  return { text, status: allPaid ? 'On-Time' : 'Follow Up', tone: allPaid ? 'green' : 'red' };
+}
+function formatPeriod(contract) {
+  if (!contract) return '-';
+  return `${contract.mulai || '-'} s/d ${contract.selesai || '-'}`;
+}
+function AssetPhotoCard({ asset, contract, invoices = [], compact = false }) {
+  const payment = getPaymentSummary(contract, invoices);
+  const stnk = stnkInfo(asset);
+  const timeline = (asset.riwayat || ['Received', 'Stored', 'Released']).slice(-3);
+  const title = asset.kategori === 'Kendaraan' ? getAssetBpkbNumber(asset) : `ASSET CARD - ${asset.id}`;
+  return <div className={`asset-id-card ${compact ? 'compact' : ''}`}><div className="asset-id-head"><b>{title}</b><span>Contract #{contract?.id || asset.id}</span></div><div className="asset-id-photo">{asset.gambar ? <img alt={asset.nama} src={asset.gambar} /> : <div className="asset-photo-placeholder"><span>{asset.kategori === 'Kendaraan' ? '🚗' : '💻'}</span><small>{asset.kategori === 'Kendaraan' ? 'Foto Kendaraan' : 'Foto Perangkat'}</small></div>}</div><div className="asset-id-name"><b>{asset.nama}</b><span>{asset.nomorPolisi || asset.nomorRangka || '-'} · {asset.warna || '-'}</span></div>{!compact && <><div className="asset-id-info"><div><span>Customer</span><b>{contract?.customer || asset.pemegang || '-'}</b></div><div><span>STNK</span><b>{asset.tanggalSTNK || '-'}</b></div><div><span>Expiration Date</span><b>{asset.tanggalSTNK || asset.tanggalAsuransi || '-'}</b></div><div><span>Loan Duration</span><b>{formatPeriod(contract)}</b></div><div><span>Payments</span><b>{payment.text}</b></div><div><span>Payment Status</span><b className={`status-${payment.tone}`}>{payment.status}</b></div><div><span>Custody Info</span><b>{asset.cabang || asset.lokasi || '-'}</b></div></div><div className="asset-id-timeline"><span>Timeline</span>{timeline.map((item, index) => <p key={`${item}-${index}`}><i className={index === timeline.length - 1 ? 'red' : 'green'} />{item}</p>)}</div><div className="asset-id-attach"><span>Attachments</span><button type="button">View Scanned BPKB</button></div></>}{stnk.due && <div className="asset-id-warning">STNK merah: {stnk.message}</div>}</div>;
+}
+function AssetCard({ asset, onDetail, onEdit, onWO, onDelete }) { const profit = numeric(asset.pendapatanBulanan) - numeric(asset.biayaBulanan); const stnk = stnkInfo(asset); return <article className={`asset-card ${stnk.due ? 'asset-card-alert' : ''}`}><div className="asset-image"><AssetPhotoCard asset={asset} compact /></div><div className="asset-body"><div className="asset-title"><div><b>{asset.nama}</b><span>{asset.id}</span></div><div className="title-pills"><span className={`pill ${riskClass(asset.risiko)}`}>Risiko {asset.risiko}%</span><span className={`pill ${stnk.level}`}>{stnk.label}</span></div></div>{stnk.due && <div className="stnk-alert"><div><b>Notifikasi merah STNK</b><span>{stnk.message}</span></div></div>}<div className="asset-meta"><span>{asset.kategori}</span><span>{asset.status}</span><span>{asset.nomorPolisi || asset.nomorRangka}</span></div><div className="asset-kpis"><span><b>{currency.format(numeric(asset.nilaiBuku))}</b>Nilai buku</span><span><b>{asset.utilisasi}%</b>Utilisasi</span><span><b>{currency.format(profit)}</b>Profit/bln</span></div><div className="bar"><i style={{ width: `${Math.min(100, Number(asset.utilisasi || 0))}%` }} /></div><p>{asset.aksiBerikutnya}</p></div><div className="card-actions"><button onClick={() => onDetail(asset)}>Aset 360</button><button onClick={() => onEdit(asset)}>Edit</button><button onClick={() => onWO(asset)}>Buat WO</button><button className="danger" onClick={() => onDelete(asset.id)}>Hapus</button></div></article>; }
+function AssetDrawer({ asset, documents, workOrders, contracts = [], invoices = [], onClose, onEdit, onWO }) { const stnk = stnkInfo(asset); const finance = numeric(asset.pendapatanBulanan) - numeric(asset.biayaBulanan); const docs = documents.filter((d) => d.asetId === asset.id); const wos = workOrders.filter((wo) => wo.asetId === asset.id); const contract = getContractForAsset(asset, contracts); const relatedInvoices = invoices.filter((invoice) => invoice.contractId === contract?.id); return <div className="drawer-backdrop" onClick={onClose}><aside className="drawer" onClick={(e) => e.stopPropagation()}><div className="drawer-head"><div><p className="eyebrow">Aset 360</p><h2>{asset.nama}</h2><p className="muted">{asset.id} · {asset.qrCode}</p></div><button onClick={onClose}>×</button></div><div className="asset-360-hero"><AssetPhotoCard asset={asset} contract={contract} invoices={relatedInvoices} /><div className="asset-360-summary"><h3>Ringkasan Aset</h3><p>Tampilan foto kendaraan dibuat kembali seperti kartu identitas/BPKB supaya terlihat premium, rapi, dan foto tidak terpotong.</p><div className="quick-summary two-cols"><div><b>{asset.status}</b><span>Status unit</span></div><div><b>{asset.nomorPolisi || '-'}</b><span>Nopol / serial</span></div><div><b>{contract?.status || 'Belum ada kontrak'}</b><span>Status kontrak</span></div><div><b>{currency.format(finance)}</b><span>Profit bulanan</span></div></div></div></div>{stnk.due && <div className="stnk-alert"><div><b>Notifikasi merah STNK</b><span>{stnk.message}</span></div><span className="pill red">Wajib diperpanjang</span></div>}<div className="detail-grid"><Info label="Status" value={asset.status} /><Info label="Kategori" value={asset.kategori} /><Info label="Cabang" value={asset.cabang} /><Info label="Pemegang" value={asset.pemegang} /><Info label="Nopol / Serial" value={asset.nomorPolisi || asset.nomorRangka} /><Info label="QR / Barcode" value={asset.qrCode} /><Info label="Nomor Rangka" value={asset.nomorRangka} /><Info label="Nomor Mesin / IMEI" value={asset.nomorMesin} /><Info label="STNK" value={asset.tanggalSTNK || '-'} /><Info label="Status STNK" value={asset.kategori === 'Kendaraan' ? stnk.message : '-'} /><Info label="KIR" value={asset.tanggalKIR || '-'} /><Info label="Pajak" value={asset.tanggalPajak || '-'} /><Info label="Asuransi" value={asset.tanggalAsuransi || '-'} /><Info label="Service Berikutnya" value={asset.tanggalServiceBerikutnya || '-'} /><Info label="BPKB" value={asset.memilikiBPKB} /><Info label="Nilai Buku" value={currency.format(numeric(asset.nilaiBuku))} /><Info label="Profit Bulanan" value={currency.format(finance)} /><Info label="Telemetri" value={asset.telemetri} /></div><div className="timeline"><h3>Timeline Aktivitas</h3>{(asset.riwayat || []).map((item, index) => <div className="timeline-row" key={`${item}-${index}`}><b>{index + 1}</b><span>{item}</span></div>)}</div><div className="drawer-section"><h3>Dokumen Aset</h3>{docs.length ? docs.map((d) => <div className="mini-row" key={d.id}><b>{d.tipe}</b><span>{d.nama} · {d.status}</span></div>) : <p className="muted">Belum ada dokumen terkait.</p>}</div><div className="drawer-section"><h3>History Maintenance</h3>{wos.length ? wos.map((wo) => <div className="mini-row" key={wo.id}><b>{wo.id}</b><span>{wo.status} · {currency.format(numeric(wo.biaya))}</span></div>) : <p className="muted">Belum ada WO terkait.</p>}</div><div className="drawer-actions"><button className="btn primary" onClick={() => onEdit(asset)}>Edit Aset</button><button className="btn ghost" onClick={() => onWO(asset)}>Buat Work Order</button><button className="btn ghost" onClick={() => navigator.clipboard?.writeText(asset.qrCode)}>Copy QR</button></div></aside></div>; }
+function Info({ label, value }) { return <div className="info"><span>{label}</span><b>{value || '-'}</b></div>; }
+function AssetForm({ asset, onClose, onSave }) { const [form, setForm] = useState(normalizeAsset(asset)); const set = (key, value) => setForm((prev) => ({ ...prev, [key]: value })); async function imageToDataUrl(file) { if (!file) return; const reader = new FileReader(); reader.onload = () => set('gambar', reader.result); reader.readAsDataURL(file); } return <Modal title={asset.id ? 'Edit Aset' : 'Tambah Aset'} onClose={onClose}><div className="form-grid"><Field label="ID Aset" value={form.id} onChange={(v) => set('id', v)} placeholder="Kosongkan untuk otomatis" /><Field label="Nama Aset" value={form.nama} onChange={(v) => set('nama', v)} /><Select label="Kategori" value={form.kategori} options={categoryOptions} onChange={(v) => set('kategori', v)} /><Select label="Status" value={form.status} options={statusOptions} onChange={(v) => set('status', v)} /><Field label="Tipe" value={form.tipe} onChange={(v) => set('tipe', v)} /><Field label="Kondisi" value={form.kondisi} onChange={(v) => set('kondisi', v)} /><Field label="Cabang / Wilayah" value={form.cabang} onChange={(v) => { set('cabang', v); set('wilayah', v); }} /><Field label="Lokasi" value={form.lokasi} onChange={(v) => set('lokasi', v)} /><Field label="Pemegang / Customer" value={form.pemegang} onChange={(v) => { set('pemegang', v); set('perusahaanUser', v); }} /><Field label="Alamat User" value={form.alamatUser} onChange={(v) => set('alamatUser', v)} /><Field label="Warna" value={form.warna} onChange={(v) => set('warna', v)} /><Field label="Tahun Kendaraan" value={form.tahunKendaraan} onChange={(v) => set('tahunKendaraan', v)} /><Field label="Nomor Polisi" value={form.nomorPolisi} onChange={(v) => set('nomorPolisi', v)} /><Field label="QR / Barcode" value={form.qrCode} onChange={(v) => set('qrCode', v)} /><Field label="Nomor Rangka / Serial" value={form.nomorRangka} onChange={(v) => set('nomorRangka', v)} /><Field label="Nomor Mesin / IMEI" value={form.nomorMesin} onChange={(v) => set('nomorMesin', v)} /><Field label="Tanggal STNK" type="date" value={form.tanggalSTNK} onChange={(v) => set('tanggalSTNK', v)} /><Field label="Tanggal KIR" type="date" value={form.tanggalKIR} onChange={(v) => set('tanggalKIR', v)} /><Field label="Tanggal Pajak" type="date" value={form.tanggalPajak} onChange={(v) => set('tanggalPajak', v)} /><Field label="Tanggal Asuransi" type="date" value={form.tanggalAsuransi} onChange={(v) => set('tanggalAsuransi', v)} /><Field label="Service Berikutnya" type="date" value={form.tanggalServiceBerikutnya} onChange={(v) => set('tanggalServiceBerikutnya', v)} /><Select label="Memiliki BPKB" value={form.memilikiBPKB} options={['Ya', 'Tidak', 'Belum diisi', '-']} onChange={(v) => set('memilikiBPKB', v)} /><Field label="Utilisasi %" type="number" value={form.utilisasi} onChange={(v) => set('utilisasi', v)} /><Field label="Risiko %" type="number" value={form.risiko} onChange={(v) => set('risiko', v)} /><Field label="Nilai Buku" type="number" value={form.nilaiBuku} onChange={(v) => set('nilaiBuku', v)} /><Field label="Pendapatan Bulanan" type="number" value={form.pendapatanBulanan} onChange={(v) => set('pendapatanBulanan', v)} /><Field label="Biaya Bulanan" type="number" value={form.biayaBulanan} onChange={(v) => set('biayaBulanan', v)} /><label className="field full"><span>Upload Foto Aset</span><input type="file" accept="image/*" onChange={(e) => imageToDataUrl(e.target.files?.[0])} /><small className="field-help">Foto disimpan dari file asli tanpa kompresi. Tampilan kartu memakai mode contain agar foto kendaraan tidak terpotong/gepeng.</small></label><TextArea label="Aksi Berikutnya" value={form.aksiBerikutnya} onChange={(v) => set('aksiBerikutnya', v)} /><TextArea label="Telemetri / Catatan" value={form.telemetri} onChange={(v) => set('telemetri', v)} /></div><div className="modal-actions"><button className="btn ghost" onClick={onClose}>Batal</button><button className="btn primary" onClick={() => onSave(form)}>Simpan</button></div></Modal>; }
+function WorkOrderForm({ form, assets, vendors, onClose, onSave }) { const [draft, setDraft] = useState(normalizeWorkOrder(form, assets.find((a) => a.id === form.asetId))); const set = (key, value) => setDraft((prev) => ({ ...prev, [key]: value })); const selectedAsset = assets.find((asset) => asset.id === draft.asetId); return <Modal title="Work Order" onClose={onClose}><div className="form-grid"><Select label="Aset" value={draft.asetId} options={assets.map((asset) => asset.id)} onChange={(v) => { const a = assets.find((asset) => asset.id === v); setDraft((prev) => ({ ...prev, asetId: v, namaAset: a?.nama || '', nopol: a?.nomorPolisi || '-' })); }} /><Field label="Nama Aset" value={selectedAsset?.nama || draft.namaAset} onChange={(v) => set('namaAset', v)} /><Field label="Nomor Polisi" value={selectedAsset?.nomorPolisi || draft.nopol || '-'} onChange={(v) => set('nopol', v)} /><Select label="Jenis" value={draft.jenis} options={workOrderType} onChange={(v) => set('jenis', v)} /><Select label="Prioritas" value={draft.prioritas} options={priorityOptions} onChange={(v) => set('prioritas', v)} /><Select label="Status" value={draft.status} options={workOrderStatus} onChange={(v) => set('status', v)} /><Field label="PIC" value={draft.pic} onChange={(v) => set('pic', v)} /><Select label="Vendor" value={draft.vendorId || ''} options={['', ...vendors.map((v) => v.id)]} onChange={(v) => set('vendorId', v)} /><Field label="Tanggal Mulai" type="date" value={draft.tanggalMulai} onChange={(v) => set('tanggalMulai', v)} /><Field label="Jatuh Tempo" type="date" value={draft.jatuhTempo} onChange={(v) => set('jatuhTempo', v)} /><Field label="Tanggal Selesai" type="date" value={draft.tanggalSelesai} onChange={(v) => set('tanggalSelesai', v)} /><Field label="Nominal Biaya Aktual" type="number" value={draft.biaya} onChange={(v) => set('biaya', v)} /><Field label="Sparepart Dipakai" value={draft.sparepart} onChange={(v) => set('sparepart', v)} /><Field label="Foto Before" value={draft.fotoBefore} onChange={(v) => set('fotoBefore', v)} /><Field label="Foto After" value={draft.fotoAfter} onChange={(v) => set('fotoAfter', v)} /><TextArea label="Keluhan / Trigger" value={draft.keluhan} onChange={(v) => set('keluhan', v)} /><TextArea label="Checklist" value={draft.checklist} onChange={(v) => set('checklist', v)} /></div><div className="modal-actions"><button className="btn ghost" onClick={onClose}>Batal</button><button className="btn primary" onClick={() => onSave(draft)}>Simpan Work Order</button></div></Modal>; }
+function DataTable({ rows, columns }) { return <div className="table-wrap"><table><thead><tr>{columns.map(([, label]) => <th key={label}>{label}</th>)}</tr></thead><tbody>{rows.map((row) => <tr key={row.id}>{columns.map(([key, , format]) => <td key={key}>{format ? format(row[key], row) : row[key]}</td>)}</tr>)}</tbody></table></div>; }
+function Modal({ title, children, onClose }) { return <div className="modal-backdrop" onClick={onClose}><div className="modal" onClick={(e) => e.stopPropagation()}><div className="modal-head"><h2>{title}</h2><button onClick={onClose}>×</button></div>{children}</div></div>; }
+function Field({ label, value, onChange, type = 'text', placeholder = '' }) { return <label className="field"><span>{label}</span><input type={type} value={value ?? ''} placeholder={placeholder} onChange={(e) => onChange(e.target.value)} /></label>; }
+function PasswordField({ label, value, onChange, placeholder = '' }) { const [visible, setVisible] = useState(false); return <label className="field password-field"><span>{label}</span><div className="password-control"><input type={visible ? 'text' : 'password'} value={value ?? ''} placeholder={placeholder} onChange={(e) => onChange(e.target.value)} /><button type="button" className="password-toggle" onClick={() => setVisible((current) => !current)}>{visible ? 'Sembunyikan' : 'Lihat'}</button></div></label>; }
+function Select({ label, value, options, onChange }) { return <label className="field"><span>{label}</span><select value={value ?? ''} onChange={(e) => onChange(e.target.value)}>{options.map((item) => <option key={item} value={item}>{item || '-'}</option>)}</select></label>; }
+function TextArea({ label, value, onChange }) { return <label className="field full"><span>{label}</span><textarea value={value ?? ''} onChange={(e) => onChange(e.target.value)} rows={4} /></label>; }
+
+export default App;
