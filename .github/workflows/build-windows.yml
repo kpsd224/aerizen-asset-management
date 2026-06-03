@@ -1,4 +1,4 @@
-name: Build Aerizen Windows EXE
+name: Build Aerizen Windows Installer
 
 on:
   workflow_dispatch:
@@ -7,15 +7,16 @@ on:
 
 jobs:
   build-windows:
-    runs-on: windows-latest
+    # Pin to Windows Server 2022 so GitHub does not show the windows-latest migration notice.
+    runs-on: windows-2022
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
-          node-version: 20
+          node-version: 22
 
       - name: Install dependencies
         run: npm install --no-audit --no-fund
@@ -26,13 +27,13 @@ jobs:
       - name: Build Vite app
         run: npm run build
 
-      - name: Build Windows installer and portable EXE
-        run: npx electron-builder --win nsis portable --publish never
+      - name: Build Windows installer
+        run: npx electron-builder --win nsis --publish never
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Upload EXE artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
-          name: aerizen-windows-exe
-          path: release/*
+          name: aerizen-windows-installer
+          path: release/*.exe
