@@ -5,21 +5,54 @@ on:
   push:
     branches: ["main"]
 
+permissions:
+  contents: read
+
 jobs:
   build-windows:
-    # Pin to Windows Server 2022 so GitHub does not show the windows-latest migration notice.
     runs-on: windows-2022
+    timeout-minutes: 45
+
     steps:
       - name: Checkout repository
         uses: actions/checkout@v5
 
-      - name: Setup Node.js
+      - name: Setup Node.js 22 with npm cache
         uses: actions/setup-node@v6
         with:
-          node-version: 22
+          node-version: "22.16.0"
+          cache: npm
+          registry-url: "https://registry.npmjs.org"
+
+      - name: Show tool versions
+        shell: pwsh
+        run: |
+          node --version
+          npm --version
+          npm config get registry
 
       - name: Install dependencies
-        run: npm install --no-audit --no-fund
+        shell: pwsh
+        env:
+          NPM_CONFIG_REGISTRY: https://registry.npmjs.org/
+          NPM_CONFIG_FETCH_RETRIES: "5"
+          NPM_CONFIG_FETCH_RETRY_MINTIMEOUT: "10000"
+          NPM_CONFIG_FETCH_RETRY_MAXTIMEOUT: "120000"
+        run: |
+          $ErrorActionPreference = "Continue"
+          for ($attempt = 1; $attempt -le 3; $attempt++) {
+            Write-Host "npm ci attempt $attempt of 3"
+            npm ci --no-audit --no-fund
+            if ($LASTEXITCODE -eq 0) {
+              exit 0
+            }
+            if ($attempt -lt 3) {
+              Remove-Item node_modules -Recurse -Force -ErrorAction SilentlyContinue
+              npm cache verify
+              Start-Sleep -Seconds 15
+            }
+          }
+          exit 1
 
       - name: Smoke test
         run: npm test
@@ -28,12 +61,15 @@ jobs:
         run: npm run build
 
       - name: Build Windows installer
-        run: npx electron-builder --win nsis --publish never
+        shell: pwsh
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: npm run dist:installer
 
       - name: Upload EXE artifacts
         uses: actions/upload-artifact@v6
         with:
-          name: aerizen-windows-installer
+          name: aerizen-windows-installer-v5.6
           path: release/*.exe
+          if-no-files-found: error
+          retention-days: 14
